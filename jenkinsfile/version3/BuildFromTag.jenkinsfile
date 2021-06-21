@@ -1,0 +1,37 @@
+def DOWN_BUILD = null;
+
+pipeline {
+    agent any
+
+    parameters {
+      string(name: 'TAG', defaultValue: '', trim: true,  description: 'Tag (e.g. v1.0.0)')
+    }
+
+    stages {
+        stage('Trigger Downstream') {
+          steps {
+            script {
+                DOWN_BUILD = build job: '/Platform Jobs/Version-3/Build', parameters: [string(name: 'BUILD_SOURCE', value: 'tag'), string(name: 'BUILD_VALUE', value: params.TAG)], propagate: true, wait: true
+            }
+          }
+        }
+
+        stage('Copy Artifact') {
+          steps {
+            copyArtifacts filter: 'msb/msb-rest/target/mysignaturebook.war', projectName: '/Platform Jobs/Version-3/Build', selector: specific("${DOWN_BUILD.number}")
+          }
+        }
+
+        stage('Archive') {
+          steps {
+              archiveArtifacts 'msb/msb-rest/target/mysignaturebook.war'
+          }
+        }
+    }
+
+    options {
+        buildDiscarder logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '1', daysToKeepStr: '', numToKeepStr: '1')
+        durabilityHint 'PERFORMANCE_OPTIMIZED'
+        disableConcurrentBuilds()
+    }
+}

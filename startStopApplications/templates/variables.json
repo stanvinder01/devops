@@ -1,0 +1,31 @@
+{
+  "_comment": "BUILD-START-STOP-APPS",
+  "builders": [
+    {
+      "name": "BUILD-START-STOP-APPS",
+      "type": "null",
+      "ssh_host": "{{user `ssh_host`}}",
+      "ssh_username": "{{user `ssh_username`}}",
+      "ssh_password": "{{user `ssh_password`}}",
+      "ssh_port": "{{user `ssh_port`}}"
+    }
+  ],
+  "provisioners": [
+    {
+      "type": "shell",
+      "only": [
+        "BUILD-START-STOP-APPS"
+      ],
+	"environment_vars": [
+	 "ARG_APPLICATION_TYPE={{user `ARG_APPLICATION_TYPE`}}",
+	"ARG_ACTION={{user `ARG_ACTION`}}"
+	],
+      "remote_folder": "/tmp/",
+      "script": "./scripts/remoteScript.sh",
+      "skip_clean": "true"
+    }
+
+  ]
+}
+
+

@@ -1,0 +1,99 @@
+def TYPE = ''
+def SCOPE = ''
+def NEXT_VERSION = ''
+def MESSAGE = ''
+pipeline {
+    agent  any
+
+    parameters {
+       choice choices: ['qa','prod'], description: 'Release Candidate Or Prod', name: 'TAG_TYPE'
+       choice choices: ['patch','minor','major'], description: 'Type Of Release', name: 'TAG_VERSION'
+       choice(name: 'BUILD_SOURCE', choices: ['branch','tag'], description: 'Build From Branch or Tag')
+       string(name: 'BUILD_VALUE', defaultValue: 'release', trim: true,  description: 'Value of Branch (e.g. master, release) or Tag (e.g. v1.0.0)')
+    }
+
+    stages {
+      stage('Git Checkout') {
+        steps {
+          dir('INFRA') {
+            checkout([$class: 'GitSCM', branches: [[name: 'refs/remotes/origin/master']], doGenerateSubmoduleConfigurations: false, submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'jenkins-gerrit', url: 'http://192.168.11.160:8080/Infrastructure']]])
+          }
+
+          script {
+            dir('MSB') {
+                def finalBuildUrl = ''
+                if(params.BUILD_SOURCE == 'branch') {
+                  def actualBranch = params.BUILD_VALUE
+                  if(!actualBranch.startsWith('origin/')) {
+                    actualBranch = 'origin/' + actualBranch
+                  }
+                  finalBuildUrl = 'refs/remotes/' + actualBranch
+                } else if(params.BUILD_SOURCE == 'tag') {
+                  finalBuildUrl = 'refs/tags/' + params.BUILD_VALUE
+                }
+                echo 'Final Build URL: ' + finalBuildUrl
+                checkout([$class: 'GitSCM', branches: [[name: "${finalBuildUrl}"]], doGenerateSubmoduleConfigurations: false, extensions: [[$class: 'CleanBeforeCheckout']], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'jenkins-gerrit', url: 'http://192.168.11.160:8080/MSB']]])
+              }
+          }
+        }
+      }
+
+      stage('Tag Processing') {
+          steps {
+            script {
+              if('qa'.equals(params.TAG_TYPE)) {
+                TYPE = 'candidate'
+              } else {
+                TYPE = 'final'
+              }
+
+              SCOPE = params.TAG_VERSION
+
+              dir('MSB') {
+                sh 'cp ../INFRA/jenkinsfile/semtag.sh .'
+                echo "Type: $TYPE"
+                echo "Scope: $SCOPE"
+                sh label: 'Current Tags', script: """
+                          #!/usr/bin/bash
+                          bash ./semtag.sh get
+                          """
+                echo 'Getting next version'
+                NEXT_VERSION = sh(label: 'Next Version', returnStdout: true, script: """
+                          #!/usr/bin/bash
+                          bash ./semtag.sh ${TYPE} -s ${SCOPE} -o -f
+                          """).trim()
+                timeout(time: 60, unit: 'SECONDS') {
+                  input message: "Tag to be pushed: $NEXT_VERSION", ok: 'Push'
+                    MESSAGE = sh(returnStdout: true, script: """
+                          #!/usr/bin/bash
+                          bash ./semtag.sh ${TYPE} -f -v $NEXT_VERSION
+                          """).trim()
+                    writeFile file: 'tagmessage', text: MESSAGE
+                }
+              }
+            }
+          }
+      }
+
+      stage('Push Tag') {
+        steps {
+          script {
+            dir('MSB') {
+              withCredentials([usernamePassword(credentialsId: 'jenkins-gerrit', passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME')]) {
+                sh 'git config credential.helper "!p() { echo username=\\$GIT_USERNAME; echo password=\\$GIT_PASSWORD; }; p"'
+                sh ("git tag -a $NEXT_VERSION --file=tagmessage")
+                sh ("git push origin $NEXT_VERSION")
+                echo "Pushed new tag: $NEXT_VERSION"
+              }
+            }
+          }
+        }
+      }
+    }
+
+    options {
+      buildDiscarder logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '1', daysToKeepStr: '', numToKeepStr: '1')
+      durabilityHint 'PERFORMANCE_OPTIMIZED'
+      disableConcurrentBuilds()
+    }
+}

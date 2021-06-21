@@ -1,0 +1,32 @@
+def DOWN_BUILD = null;
+
+pipeline {
+    agent any
+
+    parameters {
+      string(name: 'TAG', defaultValue: '', trim: true,  description: 'Tag (e.g. v1.0.0)')
+      password(name: 'PASSPHRASE', defaultValue: '', description: 'Key Passphrase')
+    }
+
+    stages {
+      stage('Trigger Build Job') {
+        steps {
+          script {
+              DOWN_BUILD = build job: '/Platform Jobs/Version-3/Build', parameters: [string(name: 'BUILD_SOURCE', value: 'tag'), string(name: 'BUILD_VALUE', value: params.TAG)], propagate: true, wait: true
+          }
+        }
+      }
+
+      stage('Trigger Deploy Job') {
+        steps {
+          build job: '/Platform Jobs/Version-3/Deploy', parameters: [string(name: 'BUILD_NO', value: "${DOWN_BUILD.number}"), booleanParam(name: 'IS_JUMPHOST', value: true), string(name: 'SERVER_IP', value: '52.31.24.206'), string(name: 'SERVER_PORT', value: '8642'), string(name: 'USERNAME', value: 'servsupport'), password(description: 'Server password', name: 'PASSWORD', value: params.PASSPHRASE.getPlainText())]
+        }
+      }
+    }
+
+    options {
+        buildDiscarder logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '1', daysToKeepStr: '', numToKeepStr: '1')
+        durabilityHint 'PERFORMANCE_OPTIMIZED'
+        disableConcurrentBuilds()
+    }
+}

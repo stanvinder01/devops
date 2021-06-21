@@ -1,0 +1,28 @@
+def DOWN_BUILD = null;
+
+pipeline {
+    agent any
+
+    parameters {
+      string(name: 'TAG', defaultValue: '', trim: true,  description: 'Tag (e.g. v1.0.0)')
+      string(name: 'DB_URL', description: 'DB Url')
+      string(name: 'DB_PORT', defaultValue: '3306', description: 'DB Port')
+      string(name: 'DB_USER', defaultValue: 'msb', description: 'DB User')
+      password(name: 'DB_PASSWORD', description: 'DB Password')
+      string(name: 'FLYWAY_PROFILE', defaultValue: 'none', description: 'Flyway Profile')
+    }
+
+    stages {
+        stage('Trigger Downstream') {
+          steps {
+            build job: '/Platform Jobs/Version-3/Flyway', parameters: [string(name: 'BUILD_SOURCE', value: 'tag'), string(name: 'BUILD_VALUE', value: params.TAG), string(name: 'DB_URL', value: params.DB_URL), string(name: 'DB_PORT', value: params.DB_PORT), string(name: 'DB_USER', value: params.DB_USER), password(name: 'DB_PASSWORD', value: params.DB_PASSWORD.getPlainText()), string(name: 'FLYWAY_PROFILE', value: params.FLYWAY_PROFILE)], propagate: true, wait: true
+          }
+        }
+    }
+
+    options {
+        buildDiscarder logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '1', daysToKeepStr: '', numToKeepStr: '1')
+        durabilityHint 'PERFORMANCE_OPTIMIZED'
+        disableConcurrentBuilds()
+    }
+}

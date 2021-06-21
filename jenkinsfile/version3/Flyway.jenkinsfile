@@ -1,0 +1,108 @@
+def CURRENT_USER = ''
+def CURRENT_IP = ''
+pipeline {
+    agent any
+
+    environment {
+        MVN_SETTINGS = 'nexus37Maven'
+        TOOL_JDK = 'LocalJDK8'
+        TOOL_MVN = 'Maven3.6'
+    }
+
+    tools {
+        maven "${TOOL_MVN}"
+        jdk "${TOOL_JDK}"
+    }
+
+    parameters {
+      choice(name: 'BUILD_SOURCE', choices: ['branch','tag','refspec'], description: 'Build From Branch, Tag or Refspec')
+      string(name: 'BUILD_VALUE', defaultValue: 'master', trim: true,  description: 'Value of Branch (e.g. master, release), Tag (e.g. v1.0.0) or Refspec (e.g. 77/9377/1)')
+      string(name: 'DB_URL', description: 'DB Url')
+      string(name: 'DB_PORT', defaultValue: '3306', description: 'DB Port')
+      string(name: 'DB_USER', defaultValue: 'msb', description: 'DB User')
+      password(name: 'DB_PASSWORD', description: 'DB Password')
+      string(name: 'FLYWAY_PROFILE', defaultValue: 'none', description: 'Flyway Profile')
+    }
+
+    stages {
+      stage('Check Access') {
+          when {
+            expression {
+               wrap([$class: 'BuildUser']) {
+                 CURRENT_USER = env.BUILD_USER_ID
+              }
+
+              CURRENT_IP = params.DB_URL
+
+              configFileProvider([configFile(fileId: 'protected-servers-config', variable: 'accessCheckFile')]) {
+                def accessCheckProps = readProperties file: "$accessCheckFile"
+                def msb_prod_ips = accessCheckProps['msb-prod-ips']
+                def msb_prod_allowed_users = accessCheckProps['msb-prod-allowed-users']
+                def msb_uat_ips = accessCheckProps['msb-uat-ips']
+                def msb_uat_allowed_users = accessCheckProps['msb-uat-allowed-users']
+
+                if(msb_prod_ips.tokenize(',').contains(CURRENT_IP)){
+                  if(msb_prod_allowed_users.tokenize(',').contains(CURRENT_USER)) {
+                    return false
+                  } else {
+                    return true
+                  }
+                } else if(msb_uat_ips.tokenize(',').contains(CURRENT_IP)){
+                  if(msb_uat_allowed_users.tokenize(',').contains(CURRENT_USER)) {
+                    return false
+                  } else {
+                    return true
+                  }
+                } else {
+                   return false
+                }
+              }
+            }
+          }
+
+          steps {
+            error('User not allowed to run job on input IP')
+          }
+        }
+
+        stage('Git Checkout') {
+          steps {
+            script {
+              def finalBuildUrl = ''
+              def finalrefspecUrl = ''
+              if(params.BUILD_SOURCE == 'branch') {
+                def actualBranch = params.BUILD_VALUE
+                if(!actualBranch.startsWith('origin/')) {
+                  actualBranch = 'origin/' + actualBranch
+                }
+                finalBuildUrl = 'refs/remotes/' + actualBranch
+              } else if(params.BUILD_SOURCE == 'tag') {
+                finalBuildUrl = 'refs/tags/' + params.BUILD_VALUE
+              } else if(params.BUILD_SOURCE == 'refspec') {
+                finalBuildUrl = 'refs/changes/' + params.BUILD_VALUE
+                finalrefspecUrl = finalBuildUrl + ':' + finalBuildUrl
+              }
+              echo 'Final Build URL: ' + finalBuildUrl
+              echo 'Final Refspec: ' + finalrefspecUrl
+              def scmVars =  checkout([$class: 'GitSCM', branches: [[name: "${finalBuildUrl}"]], doGenerateSubmoduleConfigurations: false, extensions: [[$class: 'CloneOption', honorRefspec: true, noTags: false, reference: '', shallow: false], [$class: 'CleanBeforeCheckout']], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'jenkins-gerrit', refspec: "${finalrefspecUrl}", url: 'http://192.168.11.160:8080/MSB']]])
+              echo 'SCM Commit id: ' +scmVars.GIT_COMMIT
+              echo 'SCM Branch: ' +scmVars.GIT_BRANCH
+            }
+          }
+        }
+
+        stage('Run Flyway') {
+          steps {
+              withMaven(mavenSettingsConfig: "${MVN_SETTINGS}", maven: "${TOOL_MVN}", jdk: "${TOOL_JDK}") {
+                sh "mvn -f msb/database/pom.xml flyway:migrate -Dflyway.user=${params.DB_USER} -Dflyway.password=${params.DB_PASSWORD} -Dflyway-profile=${params.FLYWAY_PROFILE} -Dflyway.url=jdbc:mysql://${params.DB_URL}:${params.DB_PORT}/'msb?useUnicode=true&connectionCollation=utf8_general_ci&characterSetResults=utf8&characterEncoding=UTF-8&useSSL=false&createDatabaseIfNotExist=true&max_allowed_packet=1070596096&serverTimezone=America/New_York'"
+              }
+           }
+        }
+    }
+
+    options {
+        buildDiscarder logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '1', daysToKeepStr: '', numToKeepStr: '1')
+        durabilityHint 'PERFORMANCE_OPTIMIZED'
+        disableConcurrentBuilds()
+    }
+}
