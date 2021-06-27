@@ -1,0 +1,31 @@
+version: "3"
+services:
+  msb-autobot:
+    image: 192.168.20.37:9002/autobotng-script-v3:latest
+    environment:
+      JAVA_OPTS: >-
+        -Dautobot.driver.remoteUrl=http://selenium-hub:4444/wd/hub
+        -Dautobot.remote=true
+        -Dautobot.mode=${MODE}
+        -Dautobot.instance=${INSTANCE}
+        -Dautobot.browser=${BROWSER}
+        -Dautobot.baseFolder=/tmp/autobot
+        -Dautobot.pdfFolder=/tmp/autobot/pdfs/
+        -Dautobot.downloadDirectory=/home/seluser/Downloads/
+        -Dlogging.file=/tmp/autobot/log/autobot.log
+        -Dautobot.runId=${RUN_ID}
+        -Dautobot.url=${APP_URL}
+        -Dautobot.manager=TESTRAIL
+        -Dautobot.cases=${CASE_IDS}
+        -Dspring.datasource.password=msb
+        -Dspring.datasource.username=msb
+        -DDB_SERVER=msb-database
+        -DDB_PORT=3306
+    volumes:
+     - ${MOUNTED_DIR}/autobot:/tmp/autobot
+     - /etc/timezone:/etc/timezone:ro
+     - /etc/localtime:/etc/localtime:ro
+networks:
+  default:
+    external:
+      name: msb-automation-network
