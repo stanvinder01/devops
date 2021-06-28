@@ -1,0 +1,536 @@
+version: "3.5"
+
+networks:
+
+  net:
+    driver: overlay
+    driver_opts:
+      encrypted: "true"
+    attachable: true
+
+volumes:
+
+    alertmanager:
+      driver: pxd
+      driver_opts:
+        repl: 2
+        size: 2
+    alertmanagerB:
+      driver: pxd
+      driver_opts:
+        repl: 2
+        size: 2 
+    caddycerts:
+      driver: pxd
+      driver_opts:
+        repl: 2
+        size: 1
+    grafana:
+      driver: pxd
+      driver_opts:
+        repl: 2
+        size: 10
+    portainer_data:
+      driver: pxd
+      driver_opts:
+        repl: 2
+        size: 10
+    portainer_certs:
+      driver: pxd
+      driver_opts:
+        repl: 2
+        size: 1
+    prometheus:
+      driver: pxd
+      driver_opts:
+        repl: 2
+        size: 10
+    swarm-endpoints:
+      driver: pxd
+      driver_opts:
+        repl: 2
+        size: 1
+        shared: "true"
+
+configs:
+
+  alertmanager_config:
+    file: ./alertmanager/conf/alertmanager.yml
+    name: alertmanager_config$CONFALERTMANANGER
+
+  caddy_config:
+    file: ./caddy/Caddyfile
+    name: caddy_config$CONFCADDY
+  caddy_www:
+    file: ./caddy/index.html
+    name: caddy_www$CONFCADDY
+  #caddy_cert:
+  #  file: ./caddy/caddycerts/cert.pem
+  #  name: caddy_cert$CONFCADDYCERT
+  #caddy_key:
+  #  file: ./caddy/caddycerts/key.pem
+  #  name: caddy_key$CONFCADDYCERT
+
+  docker_garbage_collection:
+    file: ./docker-gc-exclude
+    name: docker_garbage_collection$CONFDOCKERGC
+
+  grafana_dashboards_nodes:
+    file: ./grafana/dashboards/nodes-netdata-dockerd-cadvisor.json
+    #file: ./grafana/dashboards/nodes-node-exporter-dockerd-cadvisor.json
+    name: grafana_dashboards_nodes$CONFGRAFANADASH
+  grafana_dashboards_containers:
+    file: ./grafana/dashboards/containers-netdata-dockerd-cadvisor.json
+    #file: ./grafana/dashboards/containers-node-exporter-dockerd-cadvisor.json
+    name: grafana_dashboards_containers$CONFGRAFANADASH
+  grafana_dashboards_etcd_cluster:
+    file: ./grafana/dashboards/etcd-cluster.json
+    name: grafana_dashboards_etcd_cluster$CONFGRAFANADASH
+  grafana_dashboards_portworx_cluster_status:
+    file: ./grafana/dashboards/portworx-cluster-status.json
+    name: grafana_dashboards_portworx_cluster_status$CONFGRAFANADASH
+  grafana_dashboards_portworx_volumes_status:
+    file: ./grafana/dashboards/portworx-volumes-status.json
+    name: grafana_dashboards_portworx_volumes_status$CONFGRAFANADASH
+  grafana_dashboards_prometheus_2_stats:
+    file: ./grafana/dashboards/prometheus-2-stats.json
+    name: grafana_dashboards_prometheus_2_stats$CONFGRAFANADASH
+
+  grafana_provisioning_datasources:
+    file: ./grafana/datasources/prometheus.yaml
+  grafana_provisioning_dashboards:
+    file: ./grafana/dashboards.yml
+
+  karma_conf:
+    file: ./karma/karma.yaml
+    name: karma_conf$CONFKARMA
+
+  prometheus_conf:
+    file: ./prometheus/conf/prometheus.yml
+    name: prometheus_conf$CONFPROM
+  prometheus_rules_nodes:
+    file: ./prometheus/rules/nodes.yml
+    name: prometheus_rules_nodes$CONFPROMRULES
+  prometheus_rules_containers:
+    file: ./prometheus/rules/containers.yml
+    name: prometheus_rules_containers$CONFPROMRULES
+  prometheus_rules_portworx:
+    file: ./prometheus/rules/portworx.yml
+    name: prometheus_rules_portworx$CONFPROMRULES
+
+services:
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--cluster.listen-address=0.0.0.0:9094'
+      - '--cluster.advertise-address=:9094'
+      - '--cluster.peer=alertmanagerB:9094'
+    configs:
+      - source: alertmanager_config
+        target: /etc/alertmanager/alertmanager.yml
+    deploy:
+      labels:
+        prometheus.enable: "true"
+        prometheus.port: "9093"
+        prometheus.path: "/metrics"
+      mode: replicated
+      placement:
+        constraints:
+          - node.Labels.storagegroup==RED
+      replicas: 1
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+    healthcheck:
+      test: "/bin/wget -q -Y off http://localhost:9093/metrics -O /dev/null > /dev/null 2>&1"
+      interval: 25s
+      timeout: 3s
+      start_period: 30s
+    networks:
+      - net
+    volumes:
+      - alertmanager:/alertmanager
+
+  alertmanagerB:
+    image: prom/alertmanager:latest
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--cluster.listen-address=0.0.0.0:9094'
+      - '--cluster.advertise-address=:9094'
+      - '--cluster.peer=alertmanager:9094'
+    configs:
+      - source: alertmanager_config
+        target: /etc/alertmanager/alertmanager.yml
+    deploy:
+      labels:
+        prometheus.enable: "true"
+        prometheus.port: "9093"
+        prometheus.path: "/metrics"
+      mode: replicated
+      placement:
+        constraints:
+          - node.Labels.storagegroup==RED
+      replicas: 1
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+    healthcheck:
+      test: "/bin/wget -q -Y off http://localhost:9093/metrics -O /dev/null > /dev/null 2>&1"
+      interval: 25s
+      timeout: 3s
+      start_period: 30s
+    networks:
+      - net
+    volumes:
+      - alertmanagerB:/alertmanager
+
+  caddy:
+    image: swarmstack/caddy:no-stats
+    configs:
+      - source: caddy_config
+        target: /etc/Caddyfile
+      - source: caddy_www
+        target: /www/index.html
+      #- source: caddy_cert
+      #  target: /etc/caddycerts/cert.pem
+      #- source: caddy_key
+      #  target: /etc/caddycerts/key.pem
+    deploy:
+      labels:
+        prometheus.enable: "true"
+        prometheus.port: "9180"
+        prometheus.path: "/metrics"
+      mode: replicated
+      placement:
+        constraints:
+          - node.Labels.storagegroup==RED
+      replicas: 1
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+    environment:
+      - ADMIN_USER=${ADMIN_USER:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
+      - CADDY_CERT=${CADDY_CERT:-self_signed}
+      - CADDY_KEY=${CADDY_KEY:-}
+      - CADDY_URL=${CADDY_URL:-}
+      - CADDYPATH=/etc/caddycerts
+      - PUSH_USER=${PUSH_USER:-pushuser}
+      - PUSH_PASSWORD=${PUSH_PASSWORD:-pushpass}
+      #- http_proxy=http://proxy.example.com:80
+      #- https_proxy=https://proxy.example.com:443
+      #- no_proxy=10.0.0.0/8,.example.com
+    networks:
+      - net
+    ports:
+      - "80:80"
+      - "443:443"
+      - "3000:3000"
+      - "9000:9000"
+      - "9090:9090"
+      - "9091:9091"
+      - "9093:9093"
+      - "9094:9094"
+      - "9095:9093"
+      - "19998:19999"
+    volumes:
+      - caddycerts:/etc/caddycerts
+
+  cadvisor:
+    image: gcr.io/google-containers/cadvisor:v0.36.0 
+    command: -logtostderr -docker_only
+    deploy:
+      labels:
+        prometheus.enable: "true"
+        prometheus.port: "8080"
+        prometheus.path: "/metrics"
+      mode: global
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+    networks:
+      - net
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  docker-gc:
+    image: clockworksoul/docker-gc-cron:latest
+    configs:
+      - source: docker_garbage_collection
+        target: /etc/docker-gc-exclude
+    deploy:
+      mode: global
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+    environment:
+        - CRON=25 11 * * *
+        # By default, docker will not remove an image if it is tagged in multiple repositories. If
+        # you have a server running docker where this is the case, for example in CI environments
+        # where dockers are being built, re-tagged, and pushed, you can set this flag to 1 to override.
+        - FORCE_IMAGE_REMOVAL=1
+        # By default, if an error is encountered when cleaning up a container, Docker will report the
+        # error back and leave it on disk. This can sometimes lead to containers accumulating. If
+        # you run into this issue, you can force the removal of the container by setting this flag.
+        - FORCE_CONTAINER_REMOVAL=1
+        # By default, docker-gc will not remove a container if it exited less than 1 hour ago.
+        # Set the GRACE_PERIOD_SECONDS variable to override this default.
+        - GRACE_PERIOD_SECONDS=3600
+        # By default, docker-gc will proceed with deletion of containers and images. To test your
+        # settings set the DRY_RUN variable to override this default
+        - DRY_RUN=0
+        # By default, this process will leave any dangling volumes untouched. To instruct the
+        # process to automatically clean up any dangling volumes, simply set this value to 1.
+        - CLEAN_UP_VOLUMES=0
+        # If you don't like all your log output and cron times being in UTC, you can set the
+        # TZ variable to override the default.
+        #- TZ=America/Chicago
+    volumes:
+        - /var/run/docker.sock:/var/run/docker.sock
+
+  grafana:
+    image: grafana/grafana:latest
+    configs:
+      - source: grafana_dashboards_containers
+        target: /etc/grafana/dashboards/containers.json
+      - source: grafana_dashboards_etcd_cluster
+        target: /etc/grafana/dashboards/etcd-cluster.json
+      - source: grafana_dashboards_nodes
+        target: /etc/grafana/dashboards/nodes.json
+      - source: grafana_dashboards_portworx_cluster_status
+        target: /etc/grafana/dashboards/portworx-cluster-status.json
+      - source: grafana_dashboards_portworx_volumes_status
+        target: /etc/grafana/dashboards/portworx-volumes-status.json
+      - source: grafana_dashboards_prometheus_2_stats
+        target: /etc/grafana/dashboards/prometheus-2-stats.json
+      - source: grafana_provisioning_dashboards
+        target: /etc/grafana/provisioning/dashboards/dashboards.yml
+      - source: grafana_provisioning_datasources
+        target: /etc/grafana/provisioning/datasources/prometheus.yaml
+    deploy:
+      labels:
+        prometheus.enable: "true"
+        prometheus.port: "3000"
+        prometheus.path: "/metrics"
+      mode: replicated
+      placement:
+        constraints:
+          - node.Labels.storagegroup==RED
+      replicas: 1
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+    environment:
+      - GF_SECURITY_ADMIN_USER=${ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      #- GF_PATHS_PROVISIONING=/etc/grafana/provisioning/
+      #- GF_SERVER_ROOT_URL=${GF_SERVER_ROOT_URL:-localhost}
+      #- GF_SMTP_ENABLED=${GF_SMTP_ENABLED:-false}
+      #- GF_SMTP_FROM_ADDRESS=${GF_SMTP_FROM_ADDRESS:-grafana@test.com}
+      #- GF_SMTP_FROM_NAME=${GF_SMTP_FROM_NAME:-Grafana}
+      #- GF_SMTP_HOST=${GF_SMTP_HOST:-smtp:25}
+      #- GF_SMTP_USER=${GF_SMTP_USER}
+      #- GF_SMTP_PASSWORD=${GF_SMTP_PASSWORD}
+      #- http_proxy=http://proxy.example.com:80
+      #- https_proxy=https://proxy.example.com:443
+      #- no_proxy=10.0.0.0/8,.example.com
+    healthcheck:
+      test: "wget -q -Y off -O /dev/null http://localhost:3000/login > /dev/null 2>&1"
+      interval: 25s
+      timeout: 3s
+      start_period: 120s
+    networks:
+      - net
+    volumes:
+      - grafana:/var/lib/grafana
+
+  karma:
+    image: lmierzwa/karma:v0.74
+    configs:
+      - source: karma_conf
+        target: /karma.yaml
+    deploy:
+      labels:
+        prometheus.enable: "true"
+        prometheus.port: "8080"
+        prometheus.path: "/metrics"
+      mode: replicated
+      replicas: 1
+    networks:
+      - net
+
+  kthxbye:
+    image: lmierzwa/kthxbye:v0.9
+    command:
+     - '-alertmanager.uri'
+     - 'http://alertmanager:9093'
+     - '-extend-if-expiring-in'
+     - '5m'
+     - '-extend-by'
+     - '12h'
+     - '-extend-with-prefix'
+     - 'ACK'
+     - '-interval'
+     - '60s'
+     - '-max-duration'
+     - '0'
+    deploy:
+      mode: replicated
+      replicas: 1
+      labels:
+        prometheus.enable: "true"
+        prometheus.port: "8080"
+        prometheus.path: "/metrics"
+    networks:
+      - net
+
+  portainer:
+    image: portainer/portainer:latest
+    command: -H tcp://tasks.portainer-agent:9001 --tlsskipverify
+    deploy:
+      mode: replicated
+      placement:
+        constraints:
+          - node.role == manager
+          - node.Labels.storagegroup==RED
+      replicas: 1
+    networks:
+      - net
+    volumes:
+      - portainer_certs:/certs
+      - portainer_data:/data
+
+  portainer-agent:
+    image: portainer/agent:latest
+    deploy:
+      mode: global
+      placement:
+        constraints: [node.platform.os == linux]
+    environment:
+      - AGENT_CLUSTER_ADDR=tasks.portainer-agent
+      - LOG_LEVEL=warn
+    networks:
+      - net
+    volumes:
+      - /var/lib/docker/volumes:/var/lib/docker/volumes
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  prometheus:
+    image: prom/prometheus:latest
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=48h'
+      - '--web.enable-admin-api'
+    configs:
+      - source: prometheus_conf
+        target: /etc/prometheus/prometheus.yml
+      - source: prometheus_rules_nodes
+        target: /etc/prometheus/nodes.yml
+      - source: prometheus_rules_containers
+        target: /etc/prometheus/containers.yml
+      - source: prometheus_rules_portworx
+        target: /etc/prometheus/portworx.yml
+    deploy:
+      labels:
+        prometheus.enable: "true"
+        prometheus.port: "9090"
+        prometheus.path: "/metrics"
+      mode: replicated
+      placement:
+        constraints:
+          - node.Labels.storagegroup==RED
+      replicas: 1
+      resources:
+        limits:
+          memory: 2048M
+        reservations:
+          memory: 1024M
+    healthcheck:
+      test: "/bin/wget -q -Y off http://localhost:9090/status -O /dev/null > /dev/null 2>&1"
+      interval: 25s
+      timeout: 3s
+      start_period: 60s
+    networks:
+      - net
+    volumes:
+      - prometheus:/prometheus
+      - swarm-endpoints:/etc/swarm-endpoints/:ro
+
+  pushgateway:
+    image: prom/pushgateway:latest
+    deploy:
+      labels:
+        prometheus.enable: "true"
+        prometheus.port: "9091"
+        prometheus.path: "/metrics"
+      mode: replicated
+      replicas: 1
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+    healthcheck:
+      test: "/bin/wget -q -Y off http://localhost:9091/ -O /dev/null > /dev/null 2>&1"
+      interval: 25s
+      timeout: 3s
+      start_period: 30s
+    networks:
+      - net
+
+  swarm-discovery-server:
+    image: bborysenko/prometheus-swarm-discovery:0.3.0
+    command:
+      - server
+      - -l=warn
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+    networks:
+      - net
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  swarm-discovery-client:
+    image: bborysenko/prometheus-swarm-discovery:0.3.0
+    command:
+      - client
+      - -i=5
+      - -s=http://swarm-discovery-server:8080
+      - -o=/swarm-endpoints/swarm-endpoints.json
+      - -p=swarmstack_prometheus
+      - -l=warn
+    deploy:
+      placement:
+        constraints:
+          - node.Labels.storagegroup==RED
+    networks:
+      - net
+    volumes:
+      - swarm-endpoints:/swarm-endpoints/

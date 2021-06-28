@@ -1,0 +1,121 @@
+global:
+  scrape_interval:     22s
+  evaluation_interval: 15s
+
+  external_labels:
+    cluster: 'swarmstack'
+
+rule_files:
+  - "nodes.yml"
+  - "containers.yml"
+  - "portworx.yml"
+
+alerting:
+  alertmanagers:
+  - static_configs:
+    - targets: [ 'alertmanager:9093', 'alertmanagerB:9093' ]
+
+scrape_configs:
+
+  - job_name: swarm-service-endpoints
+    file_sd_configs:
+      - files:
+        - /etc/swarm-endpoints/swarm-endpoints.json
+    relabel_configs:
+      # Set the instance to the hostname
+      - source_labels: [__meta_swarm_node_hostname]
+        target_label: instance
+      # scrap only running tasks
+      - source_labels: [__meta_swarm_task_desired_state]
+        regex: running
+        action: keep
+      # Add a task label
+      - source_labels: [__meta_swarm_task_name]
+        target_label: task
+
+# Scraped together by swarm-service-endpoints above
+#  - job_name: 'alertmanager'
+#    dns_sd_configs:
+#    - names:
+#      - 'tasks.alertmanager'
+#      type: 'A'
+#      port: 9093
+#
+#  - job_name: 'alertmanagerB'
+#    dns_sd_configs:
+#    - names:
+#      - 'tasks.alertmanagerB'
+#      type: 'A'
+#      port: 9093
+#
+#  - job_name: 'caddy'
+#    dns_sd_configs:
+#    - names:
+#      - 'tasks.caddy'
+#      type: 'A'
+#      port: 9180
+#
+#  - job_name: 'prometheus'
+#    static_configs:
+#      - targets: ['localhost:9090']
+#
+#  - job_name: 'cadvisor'
+#    dns_sd_configs:
+#    - names:
+#      - 'tasks.cadvisor'
+#      type: 'A'
+#      port: 8080
+#
+#  - job_name: 'grafana'
+#    dns_sd_configs:
+#    - names:
+#      - 'tasks.grafana'
+#      type: 'A'
+#      port: 3000
+#
+#  - job_name: 'karma'
+#    dns_sd_configs:
+#    - names:
+#      - 'tasks.karma'
+#      type: 'A'
+#      port: 8080
+#
+#  - job_name: 'pushgateway'
+#    honor_labels: true
+#    dns_sd_configs:
+#    - names:
+#      - 'tasks.pushgateway'
+#      type: 'A'
+#      port: 9091
+
+
+# EXAMPLE MANUAL SCRAPE CONFIG, COPY EACH STANZA FOR EACH OF YOUR NODES
+#
+# The ansible swarmstack.yml playbook adds these automatically
+#
+#  - job_name: 'netdata-swarm01.example.com'
+#    metrics_path: '/api/v1/allmetrics'
+#    params:
+#      format: [prometheus_all_hosts]
+#    honor_labels: true
+#    static_configs:
+#      - targets: ['swarm01.example.com:19999']
+
+#  - job_name: 'dockerd-swarm01.example.com'
+#    metrics_path: '/metrics'
+#    honor_labels: true
+#    static_configs:
+#      - targets: ['swarm01.example.com:9323']
+
+#  - job_name: 'etcd-swarm01.example.com'
+#    metrics_path: '/metrics'
+#    honor_labels: true
+#    static_configs:
+#      - targets: ['swarm01.example.com:2379']
+
+#  - job_name: 'portworx-swarm01.example.com'
+#    metrics_path: '/metrics'
+#    honor_labels: true
+#    static_configs:
+#      - targets: ['swarm01.example.com:9001']
+
