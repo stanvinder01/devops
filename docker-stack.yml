@@ -1,0 +1,67 @@
+version: "3.8"
+
+# Example ---------------------------------------------------------------------
+# SPRING_ACTIVE_PROFILE = local [dev | stage | prod]
+# APP_DEFAULT_PORT = [Port on which your app will be accessible on server]
+#
+# ----------------------------------------------------------------------------
+
+services:
+  web:
+    image: ${ACR_REPO}/nrg/spec/spring-boot-admin-server:${IMAGE_TAG}
+    ports:
+      - "${APP_DEFAULT_PORT}:8081"
+      - "${APP_MANAGEMENT_PORT}:8082" # This is for spring boot actuator
+    environment:
+      - "spring_profiles_active=${SPRING_ACTIVE_PROFILE}"
+      - "APP_DEFAULT_PORT=${APP_DEFAULT_PORT}"
+    secrets:
+      - sap-password
+    deploy:
+      mode: replicated
+      replicas: 1
+      resources:
+        limits:
+          cpus: '${NRG_SPEC_SPRING_BOOT_ADMIN_CPU_LIMIT}'
+          memory: ${NRG_SPEC_SPRING_BOOT_ADMIN_MEM_LIMIT}
+      update_config:
+        parallelism: 1
+        delay: 30s
+        order: start-first
+        failure_action: rollback
+        monitor: 60s
+      restart_policy:
+        condition: on-failure
+        delay: 15s
+        max_attempts: 3
+        window: 30s
+    volumes:
+      - type: bind
+        source: /etc/hosts
+        target: /etc/hosts
+        read_only: true
+    healthcheck:
+      test: if [ ! `wget -qO- http://localhost:8081/actuator/health 2>/dev/null | jq . | jq --exit-status '.status == "UP"'` ]; then exit 1; fi
+      interval: 30s
+      timeout: 45s
+      retries: 3
+      start_period: 30s
+    networks:
+      - nrg-svc-network
+    logging:
+     driver: "fluentd"
+     options:
+       fluentd-address: ${NRG_SPEC_SPRING_BOOT_ADMIN_FLUENTD_URL}
+       fluentd-async-connect: 'true'
+       fluentd-retry-wait: '5s'
+       fluentd-max-retries: '30'
+       tag: nrg-spec-springbootadmin-{{.Name}}
+
+networks:
+  nrg-svc-network:
+    external: true
+
+secrets:
+  sap-password:
+    external: true
+    name: '${SAP_PASSWORD_SECRET_NAME}'
