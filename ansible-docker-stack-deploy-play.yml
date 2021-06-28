@@ -1,0 +1,80 @@
+---
+- name: Deploying an application to docker swarm
+  hosts: "{{ HOSTS }}"
+  force_handlers: true
+
+  environment:
+    ACR_REPO: "{{ ACR_REPO }}"
+    IMAGE_TAG: "{{ IMAGE_TAG }}"
+    SPRING_ACTIVE_PROFILE: "{{ SPRING_ACTIVE_PROFILE }}"
+    APP_DEFAULT_PORT: "{{ APP_DEFAULT_PORT }}"
+    APP_MANAGEMENT_PORT: "{{ APP_MANAGEMENT_PORT }}"
+    NRG_SPEC_SPRING_BOOT_ADMIN_CPU_LIMIT: "{{ NRG_SPEC_SPRING_BOOT_ADMIN_CPU_LIMIT }}"
+    NRG_SPEC_SPRING_BOOT_ADMIN_MEM_LIMIT: "{{ NRG_SPEC_SPRING_BOOT_ADMIN_MEM_LIMIT }}"
+    NRG_SPEC_SPRING_BOOT_ADMIN_FLUENTD_URL: "{{ NRG_SPEC_SPRING_BOOT_ADMIN_FLUENTD_URL }}"
+
+  handlers:
+    - name: logout of azure container registry
+      shell: docker logout "{{ ACR_URL }}"
+
+  tasks:
+    - name: Create a directory to save compose file
+      file:
+        path: /apps01/container-apps/{{ APP_NAME }}/docker-stack-files/{{ DOCKER_STACK_FILE_DEST }}
+        state: directory
+
+    - name: Copy docker compose file to host
+      copy:
+        src: "{{ DOCKER_STACK_FILE_PATH }}/{{ DOCKER_STACK_FILE_NAME }}"
+        dest: /apps01/container-apps/{{ APP_NAME }}/docker-stack-files/{{ DOCKER_STACK_FILE_DEST }}
+
+    - name: "Login to docker registry"
+      shell: echo "{{ ACR_PASSWORD }}" | docker login -u "{{ ACR_USER }}" --password-stdin "{{ ACR_URL }}"
+      notify: logout of azure container registry
+
+    - name: "Deploying docker stack from the compose file {{ DOCKER_STACK_FILE_NAME }}"
+      community.general.docker_stack:
+        state: present
+        name: "{{ APP_NAME }}"
+        compose:
+          - /apps01/container-apps/{{ APP_NAME }}/docker-stack-files/{{ DOCKER_STACK_FILE_DEST }}/{{ DOCKER_STACK_FILE_NAME }}
+        with_registry_auth: yes
+        prune: yes
+      register: stack_deploy_output
+
+    - name: "Display stack deploy output"
+      debug: var={{ item }}
+      with_items: stack_deploy_output.stdout_lines
+
+    - name: Pause for 2 minutes until docker stack deploy is complete
+      pause:
+        minutes: 2
+
+    - name: Get app status after deployment
+      uri:
+        url: "{{ APP_BASE_URL_FOR_SMOKE_TEST }}/actuator/info"
+        method: GET
+        return_content: yes
+        status_code: 200
+        body_format: json
+      register: after_info_response
+      ignore_errors: true
+      until: after_info_response.status == 200
+      retries: 3
+      delay: 2
+
+    - name: Set build version variable
+      set_fact:
+        after_build_version: "{{ after_info_response.json.build.version }}-{{ after_info_response.json.build.time }}"
+      when: after_info_response is succeeded
+
+    - name: Print build version variable
+      debug:
+        msg: "Build version after the deployment: {{ after_build_version }}"
+      ignore_errors: true
+      
+    - name: Fail the deployment as versions are same
+      fail: 
+        msg: '[Warning] The application has same version as previous after Docker Stack Deployment'
+      when: before_build_version is defined and after_build_version is defined and before_build_version == after_build_version
+      ignore_errors: true

@@ -1,0 +1,110 @@
+resources:
+  repositories:
+    - repository: templates
+      type: git
+      name: Digital-IT-Projects/azure-build-templates
+    - repository: sharedAnsibleInventory
+      type: git
+      name: Digital-IT-Projects/nrg-shared-ansible-inventory
+
+trigger:
+  branches:
+    include:
+    - develop
+    - master
+    - features/*
+  paths:
+    exclude:
+    - README.md
+    - azure-pipelines.yml
+    - deploy-on-demand-azure-pipeline.yml
+
+  tags:
+    include:
+    - refs/tags/????/v-*-RELEASE
+
+variables:
+  ## Enable buildkit to enable better image caching and for multi stage build sometimes having error 
+  DOCKER_BUILDKIT: 1
+  playbookPath: '$(Build.SourcesDirectory)/nrg-spring-boot-admin-demo/ansible-docker-stack-deploy-play.yml'
+  appName: 'spring-boot-admin-server'
+  imageName: 'nrg/spec/spring-boot-admin-server'
+  acrName: 'nrgdigitalcr.azurecr.io'
+  java11Home: '/apps01/java/java11'
+  ansiblePythonInterpreter: '/apps01/python-configs/webops-venv/bin/python3'
+  isMainBranch: $[eq(variables['Build.SourceBranch'], 'refs/heads/master')]
+  isDevelopBranch: $[contains(variables['Build.SourceBranch'], 'refs/heads/develop')]
+  isDeployBranch: $[or(eq(variables.isMainBranch, true), eq(variables.isDevelopBranch, true))]
+  isReleaseTag: $[and(startsWith(variables['Build.SourceBranch'], 'refs/tags/'), contains(variables['Build.SourceBranch'], '/v-'), endsWith(variables['Build.SourceBranch'], '-RELEASE'))]
+  ${{ if or( eq( variables['Build.SourceBranch'], 'refs/heads/master'), eq( variables['Build.SourceBranch'], 'refs/heads/develop')) }}: 
+    mavenGoal: 'clean verify dependency:copy-dependencies -U -T 1C'
+  ${{ if and( ne( variables['Build.SourceBranch'], 'refs/heads/master' ), ne( variables['Build.SourceBranch'], 'refs/heads/develop' )) }}: 
+    mavenGoal: 'clean package dependency:copy-dependencies -U -T 1C'
+  prismaContinueOnError: false
+  playbookErxtraVars: >
+    DOCKER_STACK_FILE_PATH=$(Build.SourcesDirectory)/nrg-spring-boot-admin-demo/spring-boot-admin-server
+    DOCKER_STACK_FILE_NAME=docker-stack.yml
+    DOCKER_STACK_FILE_DEST=$(Build.BuildNumber)
+    APP_NAME=$(appName) 
+    APP_DEFAULT_PORT=$(APP_DEFAULT_PORT) 
+    APP_MANAGEMENT_PORT=$(APP_MANAGEMENT_PORT) 
+    APP_BASE_URL_FOR_SMOKE_TEST=$(APP_BASE_URL_FOR_SMOKE_TEST)
+    NRG_SPEC_SPRING_BOOT_ADMIN_CPU_LIMIT=$(NRG_SPEC_SPRING_BOOT_ADMIN_CPU_LIMIT) 
+    NRG_SPEC_SPRING_BOOT_ADMIN_MEM_LIMIT=$(NRG_SPEC_SPRING_BOOT_ADMIN_MEM_LIMIT) 
+    NRG_SPEC_SPRING_BOOT_ADMIN_FLUENTD_URL=$(NRG_SPEC_SPRING_BOOT_ADMIN_FLUENTD_URL)
+    IMAGE_TAG=$(tag) 
+    SPRING_ACTIVE_PROFILE=$(SPRING_ACTIVE_PROFILE)
+    ACR_PASSWORD=$(ACR_PASSWORD) 
+    ACR_USER=$(ACR_USER) 
+    ACR_URL=$(ACR_URL) 
+    ACR_REPO=$(ACR_REPO)
+    
+stages:
+  - stage: "Build"
+    displayName: Build
+    jobs:
+    - template: docker_pipeline/include-build-stage-for-java-sonarcloud.yml@templates
+      parameters:
+        job_display_name: 'Build spring-boot-admin-server'
+        agent_pool_name: $(agent.pool.name)
+        pom_directory: '$(System.DefaultWorkingDirectory)/spring-boot-admin-server'
+        pom_file_path: 'spring-boot-admin-server/pom.xml'
+        maven_goal: $(mavenGoal)
+        java11_Home: $(java11Home)
+        image_name: $(imageName)
+        docker_file: 'spring-boot-admin-server/Dockerfile'
+        acr_name: $(acrName)
+        prisma_continue_on_error: ${{ variables.prismaContinueOnError }}
+
+  - stage: "DEV_DOCKER_STACK_DEPLOYMENT"
+    displayName: "DEV Docker Stack Deployment"
+    variables:
+      - group: PROD_DOCKER_ACR_VG
+      - group: DEV_SPEC_SPRING_BOOT_ADMIN_VG
+      - name: tag
+        value:  $[ stageDependencies.Build.Build.outputs['pom_details.project_version'] ]
+    dependsOn: Build
+    condition: and(succeeded(), or(eq(variables.isDeployBranch, true), eq(variables.isReleaseTag, true)))
+    jobs:
+    - template: ansible_pipeline/ansible-run-playbook-using-shared-inventory.yml@templates
+      parameters:
+        agent_pool_name: $(agent.pool.name)
+        job_display_name: 'Run ansible playbook to deploy'
+        pipeline_environment_name: 'DEV_BMFSS_MTM_FE_DEPLOYMENT' #reusing pre-existing environment
+        playbook_path: $(playbookPath)
+        inventory_path: '$(Build.SourcesDirectory)/nrg-shared-ansible-inventory/environments/dev/inventory'
+        playbook_hosts: 'app_server1' # Should match dev host group name in inventory file
+        ansible_python_interpreter: $(ansiblePythonInterpreter)
+        playbook_extra_vars: $(playbookErxtraVars)    
+
+  - stage: "API_TESTS_DEV"
+    displayName: API Tests With Postman
+    dependsOn: DEV_DOCKER_STACK_DEPLOYMENT
+    condition: and(succeeded(), or(eq(variables.isDeployBranch, true), eq(variables.isReleaseTag, true)))
+    pool:
+      name: $(agent.pool.name)
+    jobs:
+    - template: postman_pipeline/include-api-tests.yml@templates
+      parameters:
+        variable_group_postman: E2E_TEST_CONFIG_VG
+        variable_group_app: DEV_SPEC_SPRING_BOOT_ADMIN_VG

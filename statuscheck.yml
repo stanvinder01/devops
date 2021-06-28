@@ -1,0 +1,28 @@
+- hosts: "{{ variable_host | default('docker_manager1') }}"
+  remote_user: root
+  become: yes
+  become_method: sudo
+  tasks:
+    - name: check reachable hosts
+      command: ping -c1 {{ inventory_hostname }}
+      register: ping_result
+      ignore_errors: no
+
+    - debug:
+        var: ping_result.stdout_lines
+
+    - name: verify docker if not already installed
+      command: systemctl status docker
+      ignore_errors: no
+      register: status
+
+    - debug:
+        var: status.stdout_lines
+
+    - name: verify the status of docker node
+      command: docker node ls
+      ignore_errors: no
+      register: ls
+
+    - debug:
+        var: ls.stdout_lines
