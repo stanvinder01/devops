@@ -1,7 +1,0 @@
-#!/bin/sh
-
-if [ "$#" == "1" ]; then
-  docker service ps $1
-else
-  docker ps --format "{{.ID}}\t{{.Status}}\t{{ printf \"%.40s\" .Names}}\t{{.Ports}}"
-fi
