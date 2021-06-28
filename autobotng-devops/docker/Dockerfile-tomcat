@@ -1,2 +1,0 @@
-FROM 192.168.20.37:9002/tomcat:8-alpine
-RUN apk add --update ttf-droid && rm -rf /var/cache/apk/*
