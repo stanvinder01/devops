@@ -1,0 +1,136 @@
+# Main example swarmstack ansible cluster file in INI format
+[swarmstack:vars]
+
+CLUSTER=swarmstack
+# The name of this cluster. Copy this file plus ../roles/swarmstack to create new separately named clusters
+
+SWARMJOIN=swarm01.example.com
+# Define a manager node for swarmstack to use
+
+EXTERNAL_ENDPOINT=external.example.com
+# This URL will be used for email or webhook links generated in Alertmanager, karma, and Prometheus
+
+ADMIN_PASSWORD=changeme!42
+# Will set the initial admin password for all tools
+
+
+
+# OTHER OPTIONAL SWARMSTACK SETTINGS
+
+CADDY_CERT=self_signed
+# Set CADDY_CERT to a valid email address if using Let's Encrypt
+# Set CADDY_CERT to '/etc/caddycerts/certfilename.pem' if bringing your own certificate, see caddy/caddycerts/README.md
+CADDY_KEY=
+# If using self_signed or Let's Encrypt, leave CADDY_KEY blank
+# Set CADDY_KEY=/etc/caddycerts/keyfilename.pem' if bringing your own certificate, see caddy/caddycerts/README.md
+CADDY_URL=
+# If using self_signed, leave CADDY_URL blank
+# Set CADDY_URL to a wildcard such as '*.example.com' or FQDN when using Let's Encrypt or User-supplied certificates
+
+LDAP_ENABLED=false
+#LDAP_GROUP=some_group_dn
+#LDAP_HOST=ldap.example.com
+#LDAP_PORT=636
+#LDAP_USE_SSL=true
+#LDAP_START_TLS=false
+#LDAP_INSECURE=true
+#LDAP_BIND_DN=ldap_bind_user
+#LDAP_BIND_PASSWORD=ldap_bind_pw
+#LDAP_SEARCH_FILTER=(&(memberOf=CN=mygroup,OU=groups,O=example.com)(objectClass=user)(sAMAccountName=%s))
+#LDAP_SEARCH_BASE_DNS=o=example.com
+#LDAP_ATTRIBUTE_USERNAME=sAMAccountName
+#LDAP_GROUP_DN=CN=mygroup,OU=groups,O=example.com
+# See https://github.com/swarmstack/swarmstack/blob/master/documentation/Using%20LDAP.md
+# Also see https://github.com/freman/caddy-reauth and http://docs.grafana.org/installation/ldap/
+
+# Set PORTWORX_LICENSE to px-enterprise to start a 30 day evaluation of Portworx's enterprise version, later downgrade to px-dev is not possible
+PORTWORX_LICENSE=px-dev
+PORTWORX_VERSION=2.4.0
+
+PROXY_ENABLED=false
+#PROXY_HTTP=http://proxy.example.com:80
+#PROXY_HTTPS=https://proxy.example.com:443
+#PROXY_YUM=_none_
+#PROXY_NOPROXY=.example.com,alertmanager,alertmanagerb,grafana,karma,portainer,prometheus,pushgateway,172.16.0.0/12,10.0.0.0/8
+# See https://github.com/swarmstack/swarmstack/blob/master/documentation/Working%20with%20swarmstack%20behind%20a%20web%20proxy.md
+
+PUSH_USER=pushuser
+PUSH_PASSWORD=changeme!43
+# Used for Prometheus Pushgateway
+
+REBOOT_DELAY=30
+REBOOT_TIMEOUT=180
+# For physical machines, try REBOOT_DELAY=300, and REBOOT_TIMEOUT=600. Physical hosts may take much longer to boot.
+
+SWARMSTACK_REPO=https://github.com/swarmstack/swarmstack
+SWARMSTACK_REPO_VERSION=master
+SWARMSTACK_SRC_DIR=/usr/local/src/swarmstack
+SWARMSTACK_LOCAL_DIR=/usr/local/src/localswarmstack
+
+
+
+# CONFIGURE YOUR HOSTS IN THE SECTIONS BELOW
+#
+# Be sure to change memory32GB or include additional memory sections and place your hosts in them if host memory sizes vary. These settings tune several EL7 sysctls for optimal performance when the docker.yml playbook is run on a host. It's safe to run the docker.yml playbook against a pre-existing Docker swarm cluster, it will detect that the swarm already exists and will only add any new hosts you've configured below in the [swarm] section to that existing cluster. Be sure to define ALL of your swarm hosts participating in the cluster here, whether or not they were instanciated by swarmstack's docker.yml playbook. Also make sure you set SWARMJOIN above to an EXISTING Docker swarm manager, so that any new nodes you are adding will be joined to it.
+
+[swarmstack:children]
+drain
+etcd
+portworx
+swarm
+memory32GB
+
+# Place hosts into this group and they will not be made available to the swarm scheduler, facilitates running non-service containers on some hosts where you might still want Portworx installed/upgraded
+[drain]
+
+[etcd]
+swarm01.example.com
+swarm02.example.com
+swarm03.example.com
+
+
+# When using Portworx PX-Developer version, use groups of 3 nodes per PWX_STORAGE_GROUP and apply
+#  a single DOCKER_STORAGE_GROUP to the same 3 swarm hosts below. You can use this label as a
+#  constraint (e.g. node.labels.storagegroup==RED) when creating docker services that require
+#  persistent volumes. This will cause these containers to always be scheduled onto one of the 3
+#  nodes whose storage volumes are being handled by Portworx.
+#
+# With PX-Enterprise, you can optionally just put all of your hosts into RED group.
+
+[portworx]
+swarm01.example.com   PWX_STORAGE_GROUP='RED'  DEVICES='["/dev/sdb"]' PWX_DATA=eth0 PWX_MGT=eth0
+swarm02.example.com   PWX_STORAGE_GROUP='RED'  DEVICES='["/dev/sdb"]' PWX_DATA=eth0 PWX_MGT=eth0
+swarm03.example.com   PWX_STORAGE_GROUP='RED'  DEVICES='["/dev/sdb"]' PWX_DATA=eth0 PWX_MGT=eth0
+
+# swarm04.example.com PWX_STORAGE_GROUP='BLUE' DEVICES='["/dev/sdb1","/dev/sdc"]'        PWX_DATA=eth0 PWX_MGT=eth0
+# swarm05.example.com PWX_STORAGE_GROUP='BLUE' DEVICES='["/dev/xvda1"]'                  PWX_DATA=eth0 PWX_MGT=eth0
+# swarm06.example.com PWX_STORAGE_GROUP='BLUE' DEVICES='["/dev/nvme0","/dev/nvme1n1p1"]' PWX_DATA=eth0 PWX_MGT=eth0
+#   You can contribute block devices or partitions to Portworx
+
+
+# Docker recommends no more than 7 manager nodes in a cluster.
+# 5 or 3 managers are warranted for smaller clusters.
+
+[swarm]
+swarm01.example.com   DOCKER_STORAGE_GROUP='RED'  ROLE='manager' DOCKER_DATA=eth0 DOCKER_MGT=eth0
+swarm02.example.com   DOCKER_STORAGE_GROUP='RED'  ROLE='manager' DOCKER_DATA=eth0 DOCKER_MGT=eth0
+swarm03.example.com   DOCKER_STORAGE_GROUP='RED'  ROLE='manager' DOCKER_DATA=eth0 DOCKER_MGT=eth0
+
+# swarm04.example.com DOCKER_STORAGE_GROUP='BLUE' ROLE='manager' DOCKER_DATA=eth0 DOCKER_MGT=eth0
+# swarm05.example.com DOCKER_STORAGE_GROUP='BLUE' ROLE='manager' DOCKER_DATA=eth0 DOCKER_MGT=eth0
+# swarm06.example.com DOCKER_STORAGE_GROUP='BLUE'                DOCKER_DATA=eth0 DOCKER_MGT=eth0
+
+
+# see playbooks/includes/tasks/sysctl_el7.yml to add other memory configurations
+[memory2GB]
+[memory4GB]
+[memory8GB]
+[memory16GB]
+
+[memory32GB]
+swarm01.example.com
+swarm02.example.com
+swarm03.example.com
+
+[memory64GB]
+[memory96GB]
