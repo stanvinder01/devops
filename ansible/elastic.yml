@@ -1,0 +1,42 @@
+- hosts: elastic-master-nodes
+  roles:
+    - role: elastic.elasticsearch
+  vars:
+    es_enable_xpack: false
+    es_data_dirs:
+      - "/data/elasticsearch/data"
+    es_log_dir: "/data/elasticsearch/logs"
+    es_java_install: true
+    es_heap_size: "1g"
+    es_config:
+      cluster.name: "elk-cluster"
+      cluster.initial_master_nodes: "here to put the ip's:port of nodes"
+      discovery.seed_hosts: "here to put the ip's:port of nodes"
+      http.port: 9200
+      node.data: false
+      node.master: true
+      bootstrap.memory_lock: false
+      network.host: '0.0.0.0'
+    es_plugins:
+     - plugin: ingest-attachment
+
+- hosts: elastic-data-nodes
+  roles:
+    - role: elastic.elasticsearch
+  vars:
+    es_enable_xpack: false
+    es_data_dirs:
+      - "/data/elasticsearch/data"
+    es_log_dir: "/data/elasticsearch/logs"
+    es_java_install: true
+    es_config:
+      cluster.name: "elk-cluster"
+      cluster.initial_master_nodes: "here to put the ip's:port of nodes"
+      discovery.seed_hosts: "here to put the ip's:port of nodes"
+      http.port: 9200
+      node.data: true
+      node.master: false
+      bootstrap.memory_lock: false
+      network.host: '0.0.0.0'
+    es_plugins:
+      - plugin: ingest-attachment
