@@ -1,0 +1,5 @@
+[linux]
+master1
+[linux:vars]
+ansible_user=root
+
