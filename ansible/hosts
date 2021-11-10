@@ -1,0 +1,9 @@
+[elastic-master-nodes]
+elastic-master01
+elastic-master02
+elastic-master03
+
+[elastic-data-nodes]
+elastic-data01
+elastic-data02
+elastic-data03
